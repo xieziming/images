@@ -1,0 +1,141 @@
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.IOException;
+import java.util.Calendar;
+import java.util.Vector;
+
+public class Util {
+	public static String arrayToString(String[] array,String separator){
+		StringBuffer sb = new StringBuffer();
+		for(int i=0;i<array.length -1 ;i++){
+			sb.append(array[i] + separator);
+		}		
+		sb.append(array[array.length-1]);
+		return sb.toString();
+	}
+	public static void deleteFolder(File file){ 
+		if(file.exists()){ 
+			if(file.isFile()){
+				file.delete(); 
+			}else if(file.isDirectory()){ 
+				File files[] = file.listFiles(); 
+				for(int i=0;i<files.length;i++){ 
+					deleteFolder(files[i]); 
+				} 
+				file.delete();
+			} 
+		}
+	} 
+	public static void writeResult(BufferedWriter result, String content){
+		try {
+			result.append(content +"\n");
+		} catch (IOException e) {
+			e.printStackTrace();
+		}		
+	}
+	public static String[] mergeArray(String[] array1,String[] array2){
+		String[] array = new String[array1.length+array2.length];
+		for(int i=0;i<array1.length ;i++){
+			array[i]=array1[i];
+		}		
+		for(int j=0;j<array2.length ;j++){
+			array[j+array1.length]=array2[j];
+		}
+		return array;
+	}
+	public static String handleQuotation(String originalStr,String separator){
+		if(originalStr.contains("\"")){
+			String[] cell = originalStr.split("\"",-1);
+			for(int i=0;i<cell.length;i++){
+				if(i%2 == 1){
+					cell[i] = cell[i].replace(separator, ":");
+				}
+			}
+			String content="";
+			for(int i=0;i<cell.length;i++){
+				content = content + cell[i];
+			}
+			return content;
+		}else{
+			return originalStr;
+		}	
+	}
+	public static String removeQuotation(String originalStr){
+		if(originalStr.contains("\"")){
+			String[] cell = originalStr.split("\"",-1);
+			return cell[1];
+		}else{
+			return originalStr;
+		}	
+	}
+	public static String handleThousands(String value){
+		return value.replace(",","");		
+	}
+	public static String getTime(){
+		Calendar ca = Calendar.getInstance();
+	    int year = ca.get(Calendar.YEAR);
+	    int month=ca.get(Calendar.MONTH);
+	    int day=ca.get(Calendar.DATE);
+	    int minute=ca.get(Calendar.MINUTE);
+	    int hour=ca.get(Calendar.HOUR);
+	    int second=ca.get(Calendar.SECOND);
+	     
+	    return year + "-" + month + "-" + day +", " + hour + ":" + minute + ":" + second;
+	}
+	public static String getFilePath(String folderPath,String syntax){
+		File dir = new File(folderPath);
+		File[] files = dir.listFiles();
+		File rtnFile = null;
+		for(int i=0;i<files.length;i++){
+			String name = files[i].getName();
+			if(name.contains(syntax)){
+				if(rtnFile != null){
+					if(files[i].length() < rtnFile.length()){
+						rtnFile = files[i];
+					}else if(files[i].getName().length() == rtnFile.getName().length()){
+						if(files[i].lastModified() > rtnFile.lastModified()){
+							rtnFile = files[i];
+						}
+					}
+				}else{
+					rtnFile = files[i];
+				}
+			}
+		}
+		if(rtnFile != null){
+			return rtnFile.getAbsolutePath();
+		}else{
+			System.out.println("cannot find file for syntax : " + syntax);
+			System.exit(1);
+			return "";
+		}
+	}
+
+	public static String[] parse(String path,String separator) {
+		if(path.length() > 0) {
+			Vector<String> parsed = new Vector<String>();
+	        int position = 0;
+	        int sepIndex = 0;
+	        while((sepIndex = path.indexOf(separator, position)) != -1) {
+	        	parsed.add(path.substring(position, sepIndex));
+	            position = sepIndex + separator.length();
+	        }
+	        parsed.add(path.substring(position));
+	        String[] result = new String[parsed.size()];
+	        for(int i = 0; i < parsed.size(); i++) {
+	            result[i] = (String)parsed.get(i);
+	        }
+	        return(result);
+	    } else {
+	    	return(new String[0]);
+	    }
+	}
+	
+	public static void main(String[] args){
+		String[] ss = parse("hhh|111|eee|eeef|4swkwk|1|","|");
+		for(int i=0;i<ss.length;i++){
+			System.out.println(ss[i]);
+		}
+		
+	}
+}

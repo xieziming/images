@@ -1,0 +1,461 @@
+public class Comparator {
+	private String report_name;
+	private String control_filePath;
+	private String actual_filePath;
+	private String result_path;
+	private String progress_path;
+	private String config_file;
+	private String column_file;
+	private String control_separtor;
+	private String actual_separtor;
+	private String control_keyNo;
+	private String actual_keyNo;
+	private String control_startRow;
+	private String actual_startRow;
+	private String control_endSign;
+	private String actual_endSign;
+	private String control_reportType;
+	private String actual_reportType;
+	
+	private String result_onlyInControl;
+	private String result_onlyInActual;
+	private String result_difference;
+	private String result_controlDifferetRows;
+	private String result_actualDifferetRows;
+	
+	private HashMap<Integer,String> treePrefix;
+	private HashMap<String,String[]> MultiNodes;
+	public int differenceCount;
+	public int onlyInControlCount;
+	public int onlyInActualCount;
+	public boolean hasException;
+	
+	private PrintStream console;
+	private PrintStream logger;
+	private PrintStream output;
+	
+	public Comparator(String control_rootPath,String actual_rootPath,String result_rootPath,String config_rootPath,String taskName){	
+		this(control_rootPath,actual_rootPath,result_rootPath,config_rootPath,taskName,false);
+	}
+	public Comparator(String control_rootPath,String actual_rootPath,String result_rootPath,String config_rootPath,String taskName, boolean isBatch){
+		Prepare(result_rootPath,taskName);
+		this.console = System.out;
+		try {
+			this.logger = new PrintStream(new FileOutputStream(this.progress_path));
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+		
+		if(isBatch){
+			this.output = this.logger;
+		}else{
+			this.output = this.console;
+		}
+		
+		if(!ReadConfiguration(control_rootPath,actual_rootPath,config_rootPath,taskName)) {
+			return;
+		}
+		
+		try {
+			CompareProcedure(result_rootPath);
+			if((this.differenceCount > 0) || (this.onlyInActualCount > 0) || (this.onlyInControlCount > 0)){
+				this.console.println(Util.getTime() +";" + taskName + ";"+ new File(this.control_filePath).getName() + ";Failed!");
+			}else{
+				if(this.hasException){
+					this.console.println(Util.getTime() +";" + taskName + ";"+ new File(this.control_filePath).getName() + ";Passed, but with exception!");
+				}else{
+					this.console.println(Util.getTime() +";" + taskName + ";"+ new File(this.control_filePath).getName() + ";Passed!");
+				}
+			}
+		} catch (Exception e) {
+			this.console.println(Util.getTime() +";" + taskName + ";"+ new File(this.control_filePath).getName()+";Failed with exceptions!");
+		}	
+		this.logger.close();
+	}
+	
+	public void CompareProcedure(String result_rootPath) throws Exception{		
+		this.output.println("--------------------Reading control file :");
+		HashMap<String, String[]> control = getContext("Control",control_filePath,control_separtor,control_keyNo);
+		this.output.println("--------------------Reading actual file :");
+		HashMap<String, String[]> actual = getContext("Actual",actual_filePath,actual_separtor,actual_keyNo);		
+		
+		ArrayList<String[]> comparedColumns = getComparedColumns();	
+		this.output.println("--------------------Comparing files :");
+		Compare(control,actual,comparedColumns);			
+		this.output.println("--------------------"+Util.getTime() + " " + report_name +" completed! Result as below : ");
+		this.output.println(this.differenceCount + " difference, " +this.onlyInControlCount +" rows only in Control, " + this.onlyInActualCount + " rows only in Actual.");	
+		this.output.println("--------------------Generating excel result : ");
+		GenerateXLS(result_rootPath);
+		this.output.println("Done!");
+	}
+	
+	private void GenerateXLS(String result_rootPath){
+		String resultXLS = result_rootPath + System.getProperty("file.separator") + "xls" + System.getProperty("file.separator")+ this.report_name +".xls";
+		if((this.differenceCount > 0) || (this.onlyInControlCount > 0) || (this.onlyInActualCount > 0)){
+			Excel.csv2xls(this.result_onlyInControl, resultXLS, this.control_separtor, "Only Exist In Control", 1, getOnlyExistHeader("Control"));
+			Excel.csv2xls(this.result_onlyInActual, resultXLS, this.actual_separtor, "Only Exist In Actual", 2, getOnlyExistHeader("Actual"));
+			Excel.csv2xls(this.result_difference, resultXLS, this.control_separtor, "Difference", 3, getDifferenceHeader("Control"));
+			Excel.csv2xls(this.result_controlDifferetRows, resultXLS, this.control_separtor, "Control Different Rows", 4, getOnlyExistHeader("Control"));
+			Excel.csv2xls(this.result_actualDifferetRows, resultXLS, this.actual_separtor, "Actual Different Rows", 5, getOnlyExistHeader("Actual"));
+		}
+	}
+
+	private boolean ReadConfiguration(String control_rootPath,String actual_rootPath,String config_rootPath,String taskName){
+		this.config_file =  config_rootPath+ System.getProperty("file.separator") + taskName +".config";
+		this.column_file = config_rootPath + System.getProperty("file.separator") + taskName +".columns";
+		if(!new File(this.config_file).exists() || !new File(this.column_file).exists()) return false;
+		
+		HashMap<String, String> config = Configuration.parseConfigFile(this.config_file,output);		
+		
+		this.control_filePath = Util.removeQuotation(config.get("Control_Path"));
+		if(!this.control_filePath.contains(System.getProperty("file.separator"))){
+			this.control_filePath = Util.getFilePath(control_rootPath,this.control_filePath);
+			output.println("find control file : " + this.control_filePath);
+		}
+		if(!new File(this.control_filePath).exists()) return false;
+		
+		this.actual_filePath = Util.removeQuotation(config.get("Actual_Path"));
+		if(!this.actual_filePath.contains(System.getProperty("file.separator"))){
+			this.actual_filePath = Util.getFilePath(actual_rootPath,this.actual_filePath);
+			output.println("find actual file : " + this.actual_filePath);
+		}
+		if(!new File(this.actual_filePath).exists()) return false;
+		
+		
+		this.report_name = taskName;
+		this.control_separtor = Util.removeQuotation(config.get("Control_Separator"));
+		this.actual_separtor = Util.removeQuotation(config.get("Actual_Separator"));
+		this.control_keyNo = config.get("Control_KeyNo");
+		this.actual_keyNo = config.get("Actual_KeyNo");	
+		
+		this.control_startRow = config.get("Control_StartRow");
+		this.actual_startRow = config.get("Actual_StartRow");
+		this.control_endSign = Util.removeQuotation(config.get("Control_EndSign"));
+		this.actual_endSign = Util.removeQuotation(config.get("Actual_EndSign"));
+		this.control_reportType = Util.removeQuotation(config.get("Control_ReportType"));
+		this.actual_reportType = Util.removeQuotation(config.get("Control_ReportType"));
+		return true;
+	}
+	public void Prepare(String root_Path,String taskName){
+		try {
+			this.result_path = root_Path + System.getProperty("file.separator") + taskName;
+			File result = new File(this.result_path);
+			if(result.exists()){	
+				Util.deleteFolder(result);
+			}
+			result.mkdirs();
+			this.progress_path = this.result_path + System.getProperty("file.separator") + "progress.log";
+			File progress = new File(this.progress_path);
+			if(!progress.exists())	progress.createNewFile();
+			
+			this.result_onlyInControl = this.result_path + System.getProperty("file.separator") + taskName + ".OnlyExistInControl";
+			this.result_onlyInActual = this.result_path + System.getProperty("file.separator") + taskName + ".OnlyExistInActual";
+			this.result_difference = this.result_path + System.getProperty("file.separator") + taskName +".Difference";
+			this.result_controlDifferetRows = this.result_path + System.getProperty("file.separator") + taskName +".ControlDifferentRows";
+			this.result_actualDifferetRows = this.result_path + System.getProperty("file.separator") + taskName +".ActualDifferentRows";
+			
+			new File(this.result_onlyInControl).createNewFile();
+			new File(this.result_onlyInActual).createNewFile();
+			new File(this.result_difference).createNewFile();
+			new File(this.result_controlDifferetRows).createNewFile();
+			new File(this.result_actualDifferetRows).createNewFile();
+		} catch (Exception e) {
+			e.printStackTrace();
+		}		
+	}
+	
+	public void Compare(HashMap<String, String[]> control,HashMap<String, String[]> actual,ArrayList<String[]> comparedColumns) throws Exception{	
+		if(control.size() < 1 || actual.size() < 1){
+			this.output.println("No records!");
+			return;
+		}else{
+			this.output.println("Control : " + control.size() + " rows, Actual : " + actual.size() + " rows");
+		}
+		
+		BufferedWriter br_result_onlyInControl = null;
+		BufferedWriter br_result_onlyInActual = null;
+		BufferedWriter br_result_difference = null;
+		BufferedWriter br_result_controlDifferentRows = null;
+		BufferedWriter br_result_actualDifferentRows = null;
+		try{
+			br_result_onlyInControl = new BufferedWriter(new FileWriter(this.result_onlyInControl));
+			br_result_onlyInActual = new BufferedWriter(new FileWriter(this.result_onlyInActual));
+			br_result_difference = new BufferedWriter(new FileWriter(this.result_difference));
+			br_result_controlDifferentRows = new BufferedWriter(new FileWriter(this.result_controlDifferetRows));
+			br_result_actualDifferentRows = new BufferedWriter(new FileWriter(this.result_actualDifferetRows));
+		}catch(Exception e){
+			e.printStackTrace();
+		}
+		
+		String control_key;
+		String[] control_cell,actual_cell;
+		Iterator<String> control_list =  control.keySet().iterator();
+		String c,a;
+		Double net;
+		int c_length,a_length;
+		int indicator=1;
+		boolean withDifference;
+		while(control_list.hasNext()){
+			control_key = control_list.next();
+			control_cell = control.get(control_key);	
+			if(control_cell.length < comparedColumns.size()){
+				this.output.println("control cell size:"+control_cell.length+" is less than compared columns size:"+  comparedColumns.size());
+				this.output.println(Util.arrayToString(control_cell,this.control_separtor));	
+				throw new Exception("with exception");
+			}else{
+				actual_cell = actual.get(control_key);
+				if(actual_cell == null){
+					this.onlyInControlCount = this.onlyInControlCount + 1;
+					Util.writeResult(br_result_onlyInControl,Util.arrayToString(control_cell,this.actual_separtor));
+				}else{
+					c_length = control_cell.length;
+					a_length= actual_cell.length;
+					withDifference = false;
+					for(int i=0;i<comparedColumns.size();i++){
+						String[] cell = comparedColumns.get(i);
+						if(!cell[3].toUpperCase().equals("N")){
+							if(Integer.valueOf(cell[1]) <= c_length && Integer.valueOf(cell[2]) <= a_length ){
+								c = control_cell[Integer.valueOf(cell[1])-1];
+								a = actual_cell[Integer.valueOf(cell[2])-1];
+								if(!c.equals(a)){
+									if(!cell[3].toUpperCase().equals("Y")){								
+										net = Math.abs(Double.valueOf(Util.handleThousands(a)) - Double.valueOf(Util.handleThousands(c)));
+										if(net > Double.valueOf(cell[3].trim())){
+											withDifference = true;
+											Util.writeResult(br_result_difference,control_key+ this.control_separtor +cell[0]+ this.control_separtor +c+ this.control_separtor +a+ this.control_separtor +net);
+											differenceCount = differenceCount + 1;
+										}
+									}else{
+										withDifference = true;
+										differenceCount = differenceCount + 1;
+										Util.writeResult(br_result_difference,control_key+ this.control_separtor +cell[0]+ this.control_separtor +c+ this.control_separtor +a+ this.control_separtor);
+									}									
+								}
+							}
+						}
+					}
+					if(withDifference){
+						Util.writeResult(br_result_controlDifferentRows,Util.arrayToString(control_cell,this.control_separtor));
+						Util.writeResult(br_result_actualDifferentRows,Util.arrayToString(actual_cell,this.actual_separtor));
+					}
+				}
+				actual.remove(control_key);
+				if(Integer.valueOf(indicator%10000) == 0){
+					this.output.println("completed : " + indicator);
+				}
+				indicator++;
+			}
+		}
+		Iterator<String> actual_list =  actual.keySet().iterator();
+		String actual_key;
+		while(actual_list.hasNext()){
+			actual_key = actual_list.next();
+			actual_cell = actual.get(actual_key);
+			this.onlyInActualCount = this.onlyInActualCount + 1;
+			Util.writeResult(br_result_onlyInActual,Util.arrayToString(actual_cell,this.actual_separtor));	
+		}
+		
+		try{
+			br_result_onlyInControl.close();
+			br_result_onlyInActual.close();
+			br_result_difference.close();
+			br_result_controlDifferentRows.close();
+			br_result_actualDifferentRows.close();
+		}catch(Exception e){
+			e.printStackTrace();
+		}
+	}
+	
+	private HashMap<Integer,String> getDifferenceHeader(String reportSide){
+		HashMap<Integer,String> differenceHeader = new HashMap<Integer,String>();
+		HashMap<Integer,String> columnNames = getColumnNames(reportSide);
+		String[] keyNos;
+		if(reportSide.equals("Control")){
+			keyNos = this.control_keyNo.split(";",-1);
+		}else{
+			keyNos = this.actual_keyNo.split(";",-1);
+		}
+		for(int i=0;i<keyNos.length;i++){
+			differenceHeader.put(i+1,columnNames.get(Integer.valueOf(keyNos[i])));
+		}
+		differenceHeader.put(keyNos.length+1,"Different Column Name");
+		differenceHeader.put(keyNos.length+2,"Control Value");
+		differenceHeader.put(keyNos.length+3,"Actual Value");
+		differenceHeader.put(keyNos.length+4,"Net");
+		return differenceHeader;
+	}
+	
+	private HashMap<Integer, String> getOnlyExistHeader(String reportSide){
+		HashMap<Integer,String> onlyExistHeader = new HashMap<Integer,String>();
+		HashMap<Integer,String> columnNames = getColumnNames(reportSide);
+		Iterator<Entry<Integer, String>> iter = columnNames.entrySet().iterator();
+		while (iter.hasNext()) {
+			Map.Entry<Integer,String> entry = (Map.Entry<Integer,String>) iter.next();
+			onlyExistHeader.put((Integer)entry.getKey(),(String)entry.getValue());
+		}
+		return onlyExistHeader;
+	}
+	
+	private HashMap<Integer,String> getColumnNames(String reportSide){
+		HashMap<Integer,String> columns = new HashMap<Integer,String>();
+		ArrayList<String[]> arrayColumns = getComparedColumns();
+		int columnNo;
+		if(reportSide.equals("Control")){
+			columnNo = 2;
+		}else{
+			columnNo = 3;
+		}
+		for(int i = 0;i< arrayColumns.size();i++){
+			String[] cell = arrayColumns.get(i);
+			if(!cell[columnNo-1].isEmpty()){
+				columns.put(Integer.valueOf(cell[columnNo-1]), cell[0]);
+			}
+		}
+		return columns;
+	}
+	private ArrayList<String[]> getComparedColumns(){
+		ArrayList<String[]> comparedColumns = new ArrayList<String[]>();
+		File file = new File(this.column_file);
+		try {
+			BufferedReader br = new BufferedReader(new FileReader(file));
+			String row = null;
+			String[] cell = null;
+			try {
+				while((row = br.readLine()) != null){
+					cell = row.split(";",-1);
+					comparedColumns.add(cell);
+				}
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+		} catch (FileNotFoundException e) {
+			e.printStackTrace();
+		}
+		
+		return comparedColumns;
+	}
+	private String[] handleReportType(String[] originalArray, String reportType){
+		if(reportType.contains("Tree")){
+			boolean isParentNode = true;
+			for(int i=0;i<originalArray.length;i++){
+				if(originalArray[i].isEmpty()){
+					if(this.treePrefix.get(i)!=null && isParentNode){
+						originalArray[i] = this.treePrefix.get(i);
+					}
+				}else{
+					treePrefix.put(i, originalArray[i]);
+					if(!originalArray[i].equals("-")){
+						isParentNode = false;
+					}
+				}
+			}
+			return originalArray;
+		}else if(reportType.contains("MultiNodes")){			
+			if(Util.removeQuotation(originalArray[0]).equals("H")) this.MultiNodes.put("H", originalArray);
+			if(Util.removeQuotation(originalArray[0]).equals("C")) this.MultiNodes.put("C", originalArray);
+			if(Util.removeQuotation(originalArray[0]).equals("D")){
+				String[] HC = Util.mergeArray(this.MultiNodes.get("H"), this.MultiNodes.get("C"));
+				String[] HCD = Util.mergeArray(HC,originalArray);
+				return HCD;
+			}
+		}else{
+			return originalArray;
+		}
+		return null;
+	}
+	
+	private HashMap<String, String[]> getContext(String reportSide, String filePath, String separator, String keyNo) throws Exception{
+		HashMap<String, String[]> context = new HashMap<String, String[]>();
+		String[] keyNos = keyNo.split(";");
+		File file = new File(filePath);
+		String fileName = file.getName();
+		if(file.getName().endsWith("xls")){
+			String convertPath = file.getParentFile().getAbsolutePath() +File.separator+"convert";
+			File convertFolder = new File(convertPath);
+			if(!convertFolder.exists()) convertFolder.mkdirs();
+			String newPath = convertPath+File.separator+ fileName+".csv";
+			File newFile = new File(newPath);
+			if(newFile.exists()) newFile.delete();
+			output.println("convert xls to csv :");
+			output.println("original file:" +file.getAbsolutePath());
+			Excel.xls2csv(filePath,separator,newPath);		
+			output.println("converted file :" +newFile.getAbsolutePath());
+			file = newFile;
+		}
+		int startRow;
+		String endSign,reportType;
+		if(reportSide == "Control"){
+			startRow = Integer.valueOf(this.control_startRow);
+			endSign = this.control_endSign;
+			reportType = this.control_reportType;
+		}else{
+			startRow = Integer.valueOf(this.actual_startRow);
+			endSign = this.actual_endSign;
+			reportType = this.actual_reportType;
+		}
+		this.treePrefix = new HashMap<Integer,String>();
+		this.MultiNodes = new HashMap<String,String[]>();
+		try {
+			BufferedReader br = new BufferedReader(new FileReader(file));
+			String row = null;
+			String[] cell = null;
+			String key = null;
+			int i=1;
+			try {
+				while((row = br.readLine()) != null){
+					if(i >= startRow){
+						if(endSign.isEmpty() || (!endSign.isEmpty() && !row.contains(endSign))){
+							cell = Util.parse(Util.handleQuotation(row,separator),separator);
+							if((cell = handleReportType(cell,reportType)) != null){	
+								for(int j=0;j<keyNos.length;j++){
+									if(key != null){
+										key = key + separator + cell[Integer.valueOf(keyNos[j])-1].trim();
+									}else{
+										key = cell[Integer.valueOf(keyNos[j])-1].trim();
+									}
+								}
+								if(context.containsKey(key)){
+									this.output.println("duplicate key : " + key + ", in row : " +i);
+									this.output.println("content : " + row);
+									this.hasException = true;
+									if(!Arrays.equals(context.get(key),cell)){
+										throw new Exception("duplicate exception");
+									}
+								}else{
+									context.put(key, cell);
+								}
+							}
+							if(Integer.valueOf(i%10000) == 0){
+								this.output.println("read row : " + i);
+							}
+							key = null;
+						}else{
+							this.output.println("Skip row : " + i + " in " + reportSide +", Content is : ");
+							this.output.println(row);
+						}
+					}else{
+						this.output.println("Skip row : " + i + " in " + reportSide +", Content is : ");
+						this.output.println(row);
+					}
+					i++;
+				}
+				br.close();
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+		} catch (FileNotFoundException e) {
+			e.printStackTrace();
+		}
+
+		return context;
+	}
+	
+	public static void main(String args[]){
+		if(args.length != 5 && args.length != 6){
+			System.out.println("parameter error!" + args.length);
+		}else{
+			if(args.length == 5) new Comparator(args[0],args[1],args[2],args[3],args[4]);
+			if((args.length == 6) && args[5].trim().toUpperCase().equals("QUIET")) new Comparator(args[0],args[1],args[2],args[3],args[4],true);
+		}
+	}
+}
